@@ -1,0 +1,15 @@
+# Lawyerly AI service — OCR + NLP microservice.
+fastapi>=0.115,<0.116
+uvicorn[standard]>=0.34,<0.35
+pydantic>=2.10,<3
+python-multipart>=0.0.20
+python-dotenv>=1.0,<2
+# HTTP client for downloading files from presigned MinIO URLs
+httpx>=0.27,<0.28
+# OCR
+pytesseract>=0.3.13
+pdf2image>=1.17.0
+Pillow>=11.0.0
+# NLP — spaCy for NER, Gemini for summarization (no torch/transformers needed)
+spacy>=3.7,<4
+google-generativeai>=0.8,<0.9

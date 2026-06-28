@@ -1,0 +1,25 @@
+{
+  "name": "lawyerly",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lawyerly — role-based, AI-powered legal marketplace for Pakistan (FYP).",
+  "workspaces": [
+    "apps/core-api",
+    "apps/web",
+    "apps/admin-web",
+    "packages/shared"
+  ],
+  "scripts": {
+    "start:all": "powershell -NoProfile -ExecutionPolicy Bypass -File start.ps1",
+    "stop:all": "powershell -NoProfile -ExecutionPolicy Bypass -File stop.ps1",
+    "dev:api": "npm run dev --workspace apps/core-api",
+    "db:generate": "npm run prisma:generate --workspace apps/core-api",
+    "db:migrate": "npm run prisma:migrate --workspace apps/core-api",
+    "db:seed": "npm run prisma:seed --workspace apps/core-api",
+    "infra:up": "docker compose up -d",
+    "infra:down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

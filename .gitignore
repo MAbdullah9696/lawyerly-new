@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnp.*
+.yarn/*
+
+# Builds
+dist/
+build/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.pem
+
+# Python (ai-service)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Prisma
+apps/core-api/prisma/*.db
+
+# Docker volumes (local data)
+.docker-data/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+apps/core-api/.env
+apps/web/.env.local
+apps/admin-web/.env.local
+apps/ai-service/.env

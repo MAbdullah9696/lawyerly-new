@@ -1,0 +1,65 @@
+# Local development infrastructure for Lawyerly.
+# Brings up PostgreSQL (relational data) and MinIO (S3-compatible object storage).
+# Application services (core-api, ai-service, web) run on the host during dev.
+#
+#   docker compose up -d        # start
+#   docker compose down         # stop (keeps volumes)
+#   docker compose down -v      # stop and wipe data
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: lawyerly-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-lawyerly}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lawyerly_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-lawyerly}
+    ports:
+      # Host 5433 -> container 5432 (host port 5432 is often taken by a local
+      # PostgreSQL install). Override with POSTGRES_PORT in .env if needed.
+      - "${POSTGRES_PORT:-5433}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-lawyerly} -d ${POSTGRES_DB:-lawyerly}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: lawyerly-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # web console
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Creates the documents bucket on first boot so the app has somewhere to write.
+  minio-setup:
+    image: minio/mc:latest
+    container_name: lawyerly-minio-setup
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 ${S3_ACCESS_KEY:-minioadmin} ${S3_SECRET_KEY:-minioadmin} &&
+      mc mb --ignore-existing local/${S3_BUCKET:-lawyerly-documents} &&
+      echo 'MinIO bucket ready';
+      "
+
+volumes:
+  pgdata:
+  miniodata:

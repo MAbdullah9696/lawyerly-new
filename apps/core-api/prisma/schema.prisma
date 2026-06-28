@@ -1,0 +1,707 @@
+// Lawyerly — Prisma schema (Milestone 1 foundation).
+// Faithful translation of the approved §4 DDL.
+//
+// Notes:
+//  - UUID PKs are DB-generated via gen_random_uuid() (PostgreSQL 13+ core).
+//  - Case-insensitive columns use the `citext` extension.
+//  - CHECK constraints and PARTIAL UNIQUE indexes are not expressible in the
+//    Prisma schema; they are appended as raw SQL in the generated migration.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [citext, pgcrypto]
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum UserRole {
+  citizen
+  lawyer
+  admin
+
+  @@map("user_role")
+}
+
+enum UserStatus {
+  active
+  suspended
+  banned
+  pending
+
+  @@map("user_status")
+}
+
+enum Province {
+  Punjab
+  Sindh
+  KPK
+  Balochistan
+  AJK
+  GB
+  Federal
+
+  @@map("province")
+}
+
+enum ExperienceBand {
+  BAND_1_5     @map("1-5")
+  BAND_6_10    @map("6-10")
+  BAND_11_20   @map("11-20")
+  BAND_20_PLUS @map("20+")
+
+  @@map("experience_band")
+}
+
+enum VerificationStatus {
+  pending
+  verified
+  rejected
+  suspended
+  banned
+
+  @@map("verification_status")
+}
+
+enum AvailabilityStatus {
+  online
+  busy
+  offline
+
+  @@map("availability_status")
+}
+
+enum LawyerDocType {
+  bar_council_cert
+  cnic_front
+  cnic_back
+  law_degree
+  profile_photo
+
+  @@map("lawyer_doc_type")
+}
+
+enum LawyerDocStatus {
+  submitted
+  verified
+  issue_found
+
+  @@map("lawyer_doc_status")
+}
+
+enum ChatSender {
+  user
+  ai
+
+  @@map("chat_sender")
+}
+
+enum FeedbackRating {
+  up
+  down
+
+  @@map("feedback_rating")
+}
+
+enum DocumentStatus {
+  uploaded
+  processing
+  analysis_complete
+  processing_failed
+  low_confidence
+
+  @@map("document_status")
+}
+
+enum CaseType {
+  Civil
+  Criminal
+  Family
+  Property
+  Corporate
+  Constitutional
+  Other
+
+  @@map("case_type")
+}
+
+enum RequestStatus {
+  pending
+  accepted
+  declined
+  expired
+
+  @@map("request_status")
+}
+
+enum ConsultationStatus {
+  active
+  closed
+
+  @@map("consultation_status")
+}
+
+enum DeliveryStatus {
+  sent
+  delivered
+  read
+
+  @@map("delivery_status")
+}
+
+enum ReportType {
+  conversation
+  profile
+  review
+
+  @@map("report_type")
+}
+
+enum ReportPriority {
+  high
+  medium
+  low
+
+  @@map("report_priority")
+}
+
+enum ReportStatus {
+  open
+  resolved
+
+  @@map("report_status")
+}
+
+enum TxnStatus {
+  paid
+  pending
+
+  @@map("txn_status")
+}
+
+enum PayoutMethodType {
+  bank
+  easypaisa
+  jazzcash
+
+  @@map("payout_method_type")
+}
+
+enum PayoutStatus {
+  requested
+  processing
+  paid
+  failed
+
+  @@map("payout_status")
+}
+
+enum AdminRole {
+  super_admin
+  moderator
+  analyst
+
+  @@map("admin_role")
+}
+
+// ============================================================================
+// CORE IDENTITY
+// ============================================================================
+
+model User {
+  id               String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  role             UserRole
+  fullName         String      @map("full_name")
+  email            String      @unique @db.Citext
+  phone            String?
+  passwordHash     String      @map("password_hash")
+  emailVerified    Boolean     @default(false) @map("email_verified")
+  twoFactorEnabled Boolean     @default(false) @map("two_factor_enabled")
+  twoFactorSecret  String?     @map("two_factor_secret") // encrypted TOTP secret
+  profilePhotoUrl  String?     @map("profile_photo_url")
+  status           UserStatus  @default(pending)
+  province         Province?
+  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  lastLoginAt      DateTime?   @map("last_login_at") @db.Timestamptz(6)
+  deactivatedAt    DateTime?   @map("deactivated_at") @db.Timestamptz(6)
+  suspendedUntil   DateTime?   @map("suspended_until") @db.Timestamptz(6) // admin timed suspension (§12.4)
+
+  lawyerProfile               LawyerProfile?
+  chatSessions                ChatSession[]
+  documents                   Document[]
+  consultationRequestsAsUser  ConsultationRequest[] @relation("RequestUser")
+  consultationRequestsAsLawyer ConsultationRequest[] @relation("RequestLawyer")
+  consultationsAsUser         Consultation[]        @relation("ConsultationUser")
+  consultationsAsLawyer       Consultation[]        @relation("ConsultationLawyer")
+  messages                    Message[]             @relation("MessageSender")
+  reviewsAsUser               Review[]              @relation("ReviewUser")
+  reviewsAsLawyer             Review[]              @relation("ReviewLawyer")
+  reportsMade                 Report[]              @relation("Reporter")
+  reportsAgainst              Report[]              @relation("ReportedParty")
+  notifications               Notification[]
+  transactions                Transaction[]         @relation("TxnLawyer")
+  payoutMethods               PayoutMethod[]
+  payouts                     Payout[]
+  refreshTokens               RefreshToken[]
+  sessions                    Session[]
+  emailOtps                   EmailOtp[]
+  passwordResetTokens         PasswordResetToken[]
+  twoFactorBackupCodes        TwoFactorBackupCode[]
+
+  @@map("users")
+}
+
+model LawyerProfile {
+  id                      String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                  String             @unique @map("user_id") @db.Uuid
+  fullLegalName           String             @map("full_legal_name")
+  cnicEncrypted           String             @map("cnic_encrypted") // AES-256-GCM ciphertext
+  cnicLast4               String?            @map("cnic_last4") @db.Char(4)
+  barCouncilNumber        String             @map("bar_council_number")
+  province                Province
+  city                    String
+  yearsExperienceBand     ExperienceBand     @map("years_experience_band")
+  practiceAreas           String[]           @default([]) @map("practice_areas")
+  languages               String[]           @default([])
+  consultationFeePkr      Int                @map("consultation_fee_pkr")
+  bio                     String
+  verificationStatus      VerificationStatus @default(pending) @map("verification_status")
+  showWinLossStats        Boolean            @default(false) @map("show_win_loss_stats")
+  availability            AvailabilityStatus @default(offline)
+  maxActiveConsultations  Int                @default(10) @map("max_active_consultations")
+  autoDeclineWhenOffline  Boolean            @default(false) @map("auto_decline_when_offline")
+  ratingAvg               Decimal            @default(0.0) @map("rating_avg") @db.Decimal(2, 1)
+  reviewCount             Int                @default(0) @map("review_count")
+  wlTotal                 Int                @default(0) @map("wl_total")
+  wlWon                   Int                @default(0) @map("wl_won")
+  wlLost                  Int                @default(0) @map("wl_lost")
+  wlOngoing               Int                @default(0) @map("wl_ongoing")
+  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  documents LawyerDocument[]
+
+  @@map("lawyer_profiles")
+}
+
+model LawyerDocument {
+  id              String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lawyerProfileId String          @map("lawyer_profile_id") @db.Uuid
+  docType         LawyerDocType   @map("doc_type")
+  fileUrl         String          @map("file_url")
+  status          LawyerDocStatus @default(submitted)
+  issueNote       String?         @map("issue_note")
+  uploadedAt      DateTime        @default(now()) @map("uploaded_at") @db.Timestamptz(6)
+
+  lawyerProfile LawyerProfile @relation(fields: [lawyerProfileId], references: [id], onDelete: Cascade)
+
+  @@index([lawyerProfileId], map: "idx_lawyer_documents_profile")
+  @@map("lawyer_documents")
+}
+
+// ============================================================================
+// AI CHATBOT (NO RAG)
+// ============================================================================
+
+model ChatSession {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  title     String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId, createdAt(sort: Desc)], map: "idx_chat_sessions_user")
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id        String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId String          @map("session_id") @db.Uuid
+  sender    ChatSender
+  text      String
+  citations String[]        @default([])
+  feedback  FeedbackRating?
+  createdAt DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt], map: "idx_chat_messages_session")
+  @@map("chat_messages")
+}
+
+// ============================================================================
+// USER DOCUMENT ANALYSIS (OCR + NLP, raw text deleted)
+// ============================================================================
+
+model Document {
+  id         String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  fileName   String         @map("file_name")
+  fileType   String         @map("file_type")
+  fileUrl    String         @map("file_url")
+  status     DocumentStatus @default(uploaded)
+  uploadDate DateTime       @default(now()) @map("upload_date") @db.Timestamptz(6)
+
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  analysis DocumentAnalysis?
+
+  @@index([userId, uploadDate(sort: Desc)], map: "idx_documents_user")
+  @@map("documents")
+}
+
+model DocumentAnalysis {
+  documentId        String    @id @map("document_id") @db.Uuid
+  caseType          CaseType? @map("case_type")
+  summary           String?
+  entities          Json      @default("[]") // [{type,value,confidence}]
+  overallConfidence Decimal?  @map("overall_confidence") @db.Decimal(4, 3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  // Raw OCR text intentionally NOT stored (privacy rule §8.7 / §9.2).
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_analyses")
+}
+
+// ============================================================================
+// CONSULTATIONS
+// ============================================================================
+
+model ConsultationRequest {
+  id            String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId        String        @map("user_id") @db.Uuid
+  lawyerId      String        @map("lawyer_id") @db.Uuid
+  caseType      CaseType      @map("case_type")
+  description   String
+  status        RequestStatus @default(pending)
+  declineReason String?       @map("decline_reason")
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt     DateTime      @map("expires_at") @db.Timestamptz(6) // createdAt + 24h (set in app)
+
+  user         User           @relation("RequestUser", fields: [userId], references: [id], onDelete: Cascade)
+  lawyer       User           @relation("RequestLawyer", fields: [lawyerId], references: [id], onDelete: Cascade)
+  consultation Consultation?
+
+  @@index([lawyerId, status], map: "idx_requests_lawyer_status")
+  @@index([userId, status], map: "idx_requests_user_status")
+  @@map("consultation_requests")
+}
+
+model Consultation {
+  id        String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String             @map("user_id") @db.Uuid
+  lawyerId  String             @map("lawyer_id") @db.Uuid
+  requestId String?            @unique @map("request_id") @db.Uuid
+  status    ConsultationStatus @default(active)
+  caseType  CaseType           @map("case_type")
+  caseNotes String?            @map("case_notes") // lawyer-only, auto-saved
+  startedAt DateTime           @default(now()) @map("started_at") @db.Timestamptz(6)
+  closedAt  DateTime?          @map("closed_at") @db.Timestamptz(6)
+
+  user         User                 @relation("ConsultationUser", fields: [userId], references: [id], onDelete: Cascade)
+  lawyer       User                 @relation("ConsultationLawyer", fields: [lawyerId], references: [id], onDelete: Cascade)
+  request      ConsultationRequest? @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  messages     Message[]
+  review       Review?
+  transactions Transaction[]
+
+  @@index([userId, status], map: "idx_consultations_user")
+  @@index([lawyerId, status], map: "idx_consultations_lawyer")
+  @@map("consultations")
+}
+
+model Message {
+  id             String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  consultationId String         @map("consultation_id") @db.Uuid
+  senderId       String         @map("sender_id") @db.Uuid
+  text           String?
+  attachments    Json           @default("[]") // refs to documents already in My Documents
+  deliveryStatus DeliveryStatus @default(sent) @map("delivery_status")
+  createdAt      DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  sender       User         @relation("MessageSender", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([consultationId, createdAt], map: "idx_messages_consultation")
+  @@map("messages")
+}
+
+// ============================================================================
+// REVIEWS & REPORTS
+// ============================================================================
+
+model Review {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  consultationId String   @unique @map("consultation_id") @db.Uuid
+  lawyerId       String   @map("lawyer_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  rating         Int      @db.SmallInt
+  text           String?
+  caseType       CaseType @map("case_type")
+  flagged        Boolean  @default(false)
+  removed        Boolean  @default(false)
+  removalReason  String?  @map("removal_reason")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Cascade)
+  lawyer       User         @relation("ReviewLawyer", fields: [lawyerId], references: [id], onDelete: Cascade)
+  user         User         @relation("ReviewUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("reviews")
+}
+
+model Report {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  reporterId      String         @map("reporter_id") @db.Uuid
+  reportedPartyId String         @map("reported_party_id") @db.Uuid
+  type            ReportType
+  reasonCategory  String         @map("reason_category")
+  reasonText      String         @map("reason_text")
+  priority        ReportPriority @default(low)
+  status          ReportStatus   @default(open)
+  resolutionNote  String?        @map("resolution_note")
+  createdAt       DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  resolvedAt      DateTime?      @map("resolved_at") @db.Timestamptz(6)
+
+  reporter      User @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedParty User @relation("ReportedParty", fields: [reportedPartyId], references: [id], onDelete: Cascade)
+
+  @@index([status, priority], map: "idx_reports_status_priority")
+  @@map("reports")
+}
+
+// ============================================================================
+// NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  type      String
+  text      String
+  link      String?
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt(sort: Desc)], map: "idx_notifications_user_unread")
+  @@map("notifications")
+}
+
+// ============================================================================
+// EARNINGS & PAYOUTS
+// ============================================================================
+
+model Transaction {
+  id                 String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  consultationId     String    @map("consultation_id") @db.Uuid
+  lawyerId           String    @map("lawyer_id") @db.Uuid
+  feePkr             Int       @map("fee_pkr")
+  platformFeePercent Decimal   @map("platform_fee_percent") @db.Decimal(5, 2) // snapshot at creation
+  netEarnedPkr       Int       @map("net_earned_pkr")
+  status             TxnStatus @default(pending)
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  consultation Consultation @relation(fields: [consultationId], references: [id], onDelete: Restrict)
+  lawyer       User         @relation("TxnLawyer", fields: [lawyerId], references: [id], onDelete: Cascade)
+
+  @@index([lawyerId, createdAt(sort: Desc)], map: "idx_transactions_lawyer")
+  @@map("transactions")
+}
+
+model PayoutMethod {
+  id        String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lawyerId  String           @map("lawyer_id") @db.Uuid
+  type      PayoutMethodType
+  details   Json // {iban,title} | {mobile}
+  isDefault Boolean          @default(false) @map("is_default")
+  createdAt DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  lawyer  User     @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  payouts Payout[]
+
+  @@map("payout_methods")
+}
+
+model Payout {
+  id          String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lawyerId    String       @map("lawyer_id") @db.Uuid
+  amountPkr   Int          @map("amount_pkr")
+  methodId    String?      @map("method_id") @db.Uuid
+  status      PayoutStatus @default(requested)
+  requestedAt DateTime     @default(now()) @map("requested_at") @db.Timestamptz(6)
+  processedAt DateTime?    @map("processed_at") @db.Timestamptz(6)
+
+  lawyer User          @relation(fields: [lawyerId], references: [id], onDelete: Cascade)
+  method PayoutMethod? @relation(fields: [methodId], references: [id], onDelete: SetNull)
+
+  @@map("payouts")
+}
+
+// ============================================================================
+// ADMIN, AUDIT, CONFIG
+// ============================================================================
+
+model AdminAccount {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  username        String    @unique @db.Citext
+  passwordHash    String    @map("password_hash")
+  role            AdminRole
+  twoFactorSecret String    @map("two_factor_secret") // encrypted; mandatory
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastLoginAt     DateTime? @map("last_login_at") @db.Timestamptz(6)
+
+  sessions AdminSession[]
+
+  @@map("admin_accounts")
+}
+
+// Single-session, 30-min-inactivity admin sessions (§12.1). No concurrent logins.
+model AdminSession {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminId      String   @map("admin_id") @db.Uuid
+  tokenHash    String   @map("token_hash")
+  ip           String?  @db.Inet
+  lastActiveAt DateTime @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  admin AdminAccount @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId], map: "idx_admin_sessions_admin")
+  @@map("admin_sessions")
+}
+
+// Append-only. UPDATE/DELETE are blocked by a trigger added in the migration.
+model AuditLog {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  adminUsername String   @map("admin_username") @db.Citext
+  actionType    String   @map("action_type")
+  targetId      String?  @map("target_id")
+  details       Json?
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([adminUsername, createdAt(sort: Desc)], map: "idx_audit_logs_username")
+  @@map("audit_logs")
+}
+
+// Singleton: enforced by a CHECK (id = TRUE) added in the migration.
+model SystemConfig {
+  id                    Boolean  @id @default(true)
+  practiceAreas         Json     @default("[]") @map("practice_areas") // [{name,enabled}]
+  chatbotDisclaimerText String   @map("chatbot_disclaimer_text")
+  platformFeePercent    Decimal  @default(10.00) @map("platform_fee_percent") @db.Decimal(5, 2)
+  emailTemplates        Json     @default("{}") @map("email_templates")
+  maintenanceMode       Boolean  @default(false) @map("maintenance_mode")
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("system_config")
+}
+
+model PracticeArea {
+  id      String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name    String  @unique
+  enabled Boolean @default(true)
+
+  @@map("practice_areas")
+}
+
+// ============================================================================
+// AUTH SUPPORT TABLES (not in §4 — approved additions)
+// ============================================================================
+
+model RefreshToken {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @map("token_hash")
+  rotatedFrom String?   @map("rotated_from") @db.Uuid
+  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rotatedFromToken RefreshToken?  @relation("TokenRotation", fields: [rotatedFrom], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  rotatedTo  RefreshToken[] @relation("TokenRotation")
+
+  @@index([userId], map: "idx_refresh_tokens_user")
+  @@map("refresh_tokens")
+}
+
+model Session {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId       String   @map("user_id") @db.Uuid
+  device       String?
+  browser      String?
+  ip           String?  @db.Inet
+  city         String?
+  lastActiveAt DateTime @default(now()) @map("last_active_at") @db.Timestamptz(6)
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, lastActiveAt(sort: Desc)], map: "idx_sessions_user")
+  @@map("sessions")
+}
+
+model EmailOtp {
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  codeHash   String    @map("code_hash")
+  attempts   Int       @default(0) @db.SmallInt
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_otps")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  tokenHash String    @map("token_hash")
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+model TwoFactorBackupCode {
+  id        String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  codeHash  String    @map("code_hash")
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "idx_2fa_backup_user")
+  @@map("two_factor_backup_codes")
+}
+
+model LoginAttempt {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email      String?  @db.Citext
+  ip         String   @db.Inet
+  successful Boolean
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([email, ip, createdAt(sort: Desc)], map: "idx_login_attempts_email_ip")
+  @@map("login_attempts")
+}
