@@ -81,6 +81,9 @@ ensureBucket()
   .then(() => console.log(`[storage] bucket ready: ${env.S3_BUCKET}`))
   .catch((e) => console.warn("[storage] bucket check failed (non-fatal):", e));
 
-server.listen(env.CORE_API_PORT, () => {
-  console.log(`core-api listening on http://localhost:${env.CORE_API_PORT} (HTTP + Socket.IO)`);
+// Railway assigns the listen port dynamically via process.env.PORT; CORE_API_PORT
+// is the local-dev fallback. Bind 0.0.0.0 explicitly so the platform's proxy can reach it.
+const PORT = process.env.PORT || env.CORE_API_PORT;
+server.listen(Number(PORT), "0.0.0.0", () => {
+  console.log(`core-api listening on 0.0.0.0:${PORT} (HTTP + Socket.IO)`);
 });
