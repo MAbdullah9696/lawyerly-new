@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["python3", "poppler_utils", "gcc", "tesseract-ocr", "tesseract-ocr-eng", "poppler-utils", "libgl1", "libglib2.0-0"]
+nixPkgs = ["python3", "gcc", "tesseract-ocr", "tesseract-ocr-eng", "poppler_utils", "libgl1", "libglib2.0-0"]
 
 [phases.install]
 cmds = [
