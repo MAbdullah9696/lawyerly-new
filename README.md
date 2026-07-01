@@ -125,3 +125,5 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 MinIO console: http://localhost:9001 (credentials: `minioadmin` / `minioadmin`).
+#   l a w y e r l y - n e w  
+ 
