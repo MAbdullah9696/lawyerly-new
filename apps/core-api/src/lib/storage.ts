@@ -1,6 +1,9 @@
 /**
- * MinIO / S3-compatible object storage helpers (§11, §8.7).
- * Presigned PUT → client uploads directly to MinIO.
+ * S3-compatible object storage helpers (§11, §8.7). Works against any
+ * S3-compatible provider (MinIO locally, Cloudflare R2 in production) —
+ * endpoint/region/credentials/path-style all come from env, nothing here
+ * assumes a specific provider.
+ * Presigned PUT → client uploads directly to the bucket.
  * Presigned GET → 1-hour expiring URLs served to the browser.
  * MIME type + magic-bytes validation happen before PUT (in the upload route).
  */
@@ -22,7 +25,12 @@ export const s3 = new S3Client({
     accessKeyId: env.S3_ACCESS_KEY,
     secretAccessKey: env.S3_SECRET_KEY,
   },
-  forcePathStyle: true, // required for MinIO
+  forcePathStyle: env.S3_FORCE_PATH_STYLE,
+  // R2 rejects the flexible-checksum headers the SDK v3 attaches by default
+  // (SignatureDoesNotMatch on presigned requests) — only send/require them
+  // when the server explicitly asks for them, which MinIO and R2 both do.
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  responseChecksumValidation: "WHEN_REQUIRED",
 });
 
 const BUCKET = env.S3_BUCKET;
@@ -53,7 +61,10 @@ export async function presignPut(
 }
 
 /** Generate a presigned GET URL (1-hour expiry per §11). */
-export async function presignGet(objectKey: string, expiresInSeconds = 3600): Promise<string> {
+export async function presignGet(
+  objectKey: string,
+  expiresInSeconds = env.S3_PRESIGN_TTL_SECONDS,
+): Promise<string> {
   const { GetObjectCommand } = await import("@aws-sdk/client-s3");
   const cmd = new GetObjectCommand({ Bucket: BUCKET, Key: objectKey });
   return getSignedUrl(s3, cmd, { expiresIn: expiresInSeconds });
