@@ -43,3 +43,9 @@ apps/core-api/.env
 apps/web/.env.local
 apps/admin-web/.env.local
 apps/ai-service/.env
+
+# Claude Code project memory (local dev tool, not part of the project)
+.claude/
+
+# Project documents (not for version control)
+docs/
